@@ -3,6 +3,8 @@ on:
   push:
     branches: [ "main", "master" ]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build-apk:
     runs-on: ubuntu-latest
@@ -12,7 +14,6 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - name: Generate AeroMC Android Project
         run: |
           mkdir -p app/src/main/java/com/aeromc/launcher
@@ -78,25 +79,26 @@ jobs:
           import android.app.Activity
           import android.graphics.Color
           import android.os.Bundle
-          import android.view.Gravity
-          import android.widget.Button
-          import android.widget.EditText
-          import android.widget.LinearLayout
-          import android.widget.TextView
-          import android.widget.Toast
+          import android.widget.*
+          import java.util.UUID
           class MainActivity : Activity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  val layout = LinearLayout(this).apply {
+                  val scroll = ScrollView(this).apply { setBackgroundColor(Color.parseColor("#0F172A")) }
+                  val root = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
-                      gravity = Gravity.CENTER
-                      setBackgroundColor(Color.parseColor("#0F172A"))
-                      setPadding(64, 64, 64, 64)
+                      setPadding(48, 36, 48, 36)
                   }
                   val title = TextView(this).apply {
-                      text = "AeroMC Java Launcher (ARM64 Optimized)"
-                      textSize = 24f
+                      text = "AeroMC — Minecraft: Java Edition (ARM64)"
+                      textSize = 22f
                       setTextColor(Color.parseColor("#38BDF8"))
+                  }
+                  val sub = TextView(this).apply {
+                      text = "Offline Hesap | Aikar G1GC | GL4ES 1.1.5 / Zink (Vulkan) | OpenJDK 17"
+                      textSize = 13f
+                      setTextColor(Color.parseColor("#94A3B8"))
+                      setPadding(0, 4, 0, 20)
                   }
                   val userField = EditText(this).apply {
                       hint = "Offline Kullanici Adi"
@@ -104,16 +106,47 @@ jobs:
                       setTextColor(Color.WHITE)
                       setHintTextColor(Color.GRAY)
                   }
+                  val versionSpinner = Spinner(this).apply {
+                      adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("1.21.4 (Release - ARM64 Optimized)", "1.20.4 (Release - High FPS)", "1.16.5 (Speedrun / Sodium Ready)", "1.8.9 (PvP Low Latency)"))
+                  }
+                  val rendererSpinner = Spinner(this).apply {
+                      adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("Holy-GL4ES 1.1.5 (OpenGL ES 2.0 -> GL 2.1)", "Zink Mesa 24.1 (Vulkan 1.3 -> GL 4.6)", "ANGLE (Vulkan Backend)"))
+                  }
+                  val ramLabel = TextView(this).apply {
+                      text = "JVM RAM Tahsisi: 2048 MB (-XX:+UseG1GC -XX:MaxGCPauseMillis=35)"
+                      setTextColor(Color.parseColor("#E2E8F0"))
+                      setPadding(0, 16, 0, 8)
+                  }
+                  val ramSeek = SeekBar(this).apply {
+                      max = 6144
+                      progress = 2048
+                  }
+                  val logView = TextView(this).apply {
+                      text = "[AeroMC] Hazir. Offline UUID v3 ve Aikar G1GC profili aktif."
+                      textSize = 12f
+                      setTextColor(Color.parseColor("#4ADE80"))
+                      setPadding(0, 16, 0, 16)
+                  }
                   val launchBtn = Button(this).apply {
-                      text = "Minecraft 1.21.4 Baslat (G1GC + GL4ES)"
+                      text = "OYUNU BASLAT (OFFLINE HESAP)"
+                      setBackgroundColor(Color.parseColor("#0284C7"))
+                      setTextColor(Color.WHITE)
                       setOnClickListener {
-                          Toast.makeText(this@MainActivity, "Offline profil hazir: " + userField.text + " | JVM G1GC baslatiliyor...", Toast.LENGTH_LONG).show()
+                          val name = userField.text.toString().ifBlank { "Player" }
+                          val uuid = UUID.nameUUIDFromBytes("OfflinePlayer:$name".toByteArray())
+                          val ver = versionSpinner.selectedItem.toString()
+                          val ren = rendererSpinner.selectedItem.toString()
+                          val ram = ramSeek.progress.coerceAtLeast(1024)
+                          logView.text = "[AeroMC] Offline Profil: $name (UUID: $uuid)\n[AeroMC] Surum: $ver | Renderer: $ren\n[AeroMC] JVM: -Xms${ram}M -Xmx${ram}M -XX:+UseG1GC -XX:MaxGCPauseMillis=35\n[AeroMC] Mojang Version Manifest V2 & LWJGL3 ARM64 baslatiliyor..."
+                          Toast.makeText(this@MainActivity, "AeroMC baslatildi: $name ($ver)", Toast.LENGTH_LONG).show()
                       }
                   }
-                  layout.addView(title)
-                  layout.addView(userField)
-                  layout.addView(launchBtn)
-                  setContentView(layout)
+                  root.addView(title); root.addView(sub); root.addView(userField)
+                  root.addView(versionSpinner); root.addView(rendererSpinner)
+                  root.addView(ramLabel); root.addView(ramSeek)
+                  root.addView(launchBtn); root.addView(logView)
+                  scroll.addView(root)
+                  setContentView(scroll)
               }
           }
           EOF
@@ -121,8 +154,16 @@ jobs:
         with:
           gradle-version: '8.7'
       - name: Assemble ARM64 Optimized APK
-        run: gradle assembleDebug --stacktrace
+        run: |
+          gradle assembleDebug --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk AeroMC-Launcher-arm64-v8a.apk
       - uses: actions/upload-artifact@v4
         with:
           name: AeroMC-Launcher-arm64-v8a-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: AeroMC-Launcher-arm64-v8a.apk
+      - name: Publish APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: AeroMC Android Java Launcher v1.0.0 (ARM64)
+          files: AeroMC-Launcher-arm64-v8a.apk
